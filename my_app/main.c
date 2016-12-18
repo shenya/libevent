@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 
 #include <event.h>
+#include <event2/event.h>
 
 #define PORT 12345
 #define BACKLOG 6
@@ -27,10 +28,13 @@ void on_read(evutil_socket_t sock_fd, short event, void *arg)
 		return;
 	}
 
-	read_count = read(client_ev->ev_fd, read_buf, 1024);
+	read_count = read(sock_fd, read_buf, 1024);
 	if (0 == read_count)
 	{
         printf("client close\n");
+		event_del(client_ev);
+		free(client_ev);
+		close(sock_fd);
 		return;
 	}
 	else if (read_count < 0)
@@ -70,7 +74,7 @@ void on_accept(evutil_socket_t sock_fd, short event, void *arg)
 		return;
 	}
 	event_set(client_ev, new_fd, EV_READ | EV_PERSIST,
-			on_read, (void *)client_ev);
+			on_read, event_self_cbarg()/*client_ev*/);
 	event_base_set(base, client_ev);
 	event_add(client_ev, NULL);
 }
@@ -79,6 +83,7 @@ int main(int argc, char *argv[])
 {
     struct sockaddr_in server_addr;
 	int sock = -1;
+	int flag = 1;
 
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock < 0)
@@ -92,7 +97,11 @@ int main(int argc, char *argv[])
 	server_addr.sin_port = htons(PORT);
 	server_addr.sin_addr.s_addr = inet_addr("0.0.0.0");
 
-    //setsockopt(sock
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)))
+	{
+        perror("error to setsockopt reuse");
+		return -1;
+	}
 	if (bind(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)))
 	{
         perror("error to bind");
