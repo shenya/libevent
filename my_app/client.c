@@ -47,12 +47,30 @@ int main(int argc, char *argv[])
 		}
 		else
 		{
+		    buf[count - 1] = '\0';
             printf("read count[%d] from stdin\n", count);
 			count = write(sock, buf, count);
 			if (count < 0)
 			{
 				perror("failed to write");
 				return -1;
+			}
+
+			count = read(sock, buf, 1024);
+			if (count > 0)
+			{
+                buf[count] = '\0';
+				printf("read data: [%s] from server\n", buf);
+			}
+			else if (count < 0)
+			{
+                printf("read error\n");
+				break;
+			}
+			else
+			{
+                printf("server is closed\n");
+				break;
 			}
 		}
 	}

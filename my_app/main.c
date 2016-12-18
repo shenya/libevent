@@ -10,8 +10,63 @@
 #define PORT 12345
 #define BACKLOG 6
 
+#define MAX_DATA_LEN 1024
+
+struct socket_data
+{
+    struct event *read_ev;
+	struct event *write_ev;
+	char *data_buf;
+	int count;
+};
 
 struct event_base *base;
+
+void release_socket_data(struct socket_data *sock_data)
+{
+    if (!sock_data)
+	{
+        return;
+	}
+
+	if (sock_data->read_ev)
+	{
+        free(sock_data->read_ev);
+	}
+
+	if (sock_data->write_ev)
+	{
+        free(sock_data->write_ev);
+	}
+
+	if (sock_data->data_buf)
+	{
+        free(sock_data->data_buf);
+	}
+
+	free(sock_data);
+}
+
+//void (*callback)(evutil_socket_t, short, void *)
+void on_write(evutil_socket_t sock_fd, short event, void *arg)
+{
+    int ret = 0;
+
+    char *buf = (char *)arg;
+	if (!buf)
+	{
+	    printf("%s: buf is NULL\n", __FUNCTION__);
+        return;
+	}
+
+    ret = write(sock_fd, buf, strlen(buf));
+	if (ret < 0)
+	{
+        printf("%s: send failed\n", __FUNCTION__);
+	}
+
+	free(buf);
+}
 
 //void (*callback)(evutil_socket_t, short, void *)
 void on_read(evutil_socket_t sock_fd, short event, void *arg)
@@ -20,33 +75,59 @@ void on_read(evutil_socket_t sock_fd, short event, void *arg)
 	struct event *client_ev = NULL;
 	char read_buf[1024] = {0};
 	int read_count = 0;
+	struct socket_data *ev_data = NULL;
 
-	client_ev = (struct event *)arg;
+    ev_data = (struct socket_data*)arg;
+	if (NULL == ev_data)
+	{
+        printf("arg is NULL\n");
+		return;
+	}
+	client_ev = ev_data->read_ev;
 	if (NULL == client_ev)
 	{
         printf("%s: arg is NULL\n", __FUNCTION__);
 		return;
 	}
 
-	read_count = read(sock_fd, read_buf, 1024);
+	ev_data->data_buf = malloc(MAX_DATA_LEN);
+	if (NULL == ev_data->data_buf)
+	{
+	    printf("malloc data buf failed\n");
+        goto on_error;
+	}
+
+	read_count = read(sock_fd, ev_data->data_buf, MAX_DATA_LEN);
 	if (0 == read_count)
 	{
         printf("client close\n");
 		event_del(client_ev);
-		free(client_ev);
 		close(sock_fd);
+		release_socket_data(ev_data);
 		return;
 	}
 	else if (read_count < 0)
 	{
         printf("read error\n");
+		event_del(client_ev);
+		close(sock_fd);
+		release_socket_data(ev_data);
 		return;
 	}
 	else
 	{
-	    read_buf[read_count] = '\0';
-        printf("read data: %s", read_buf);
+	    ev_data->data_buf[read_count] = '\0';
+		ev_data->count = read_count;
+        printf("read data: [%s] from client\n", ev_data->data_buf);
+
+		event_set(ev_data->write_ev, sock_fd, EV_WRITE, on_write,
+				ev_data->data_buf);
+		event_base_set(base, ev_data->write_ev);
+		event_add(ev_data->write_ev, NULL);
 	}
+
+on_error:
+    return;
 }
 
 //void (*callback)(evutil_socket_t, short, void *)
@@ -57,7 +138,7 @@ void on_accept(evutil_socket_t sock_fd, short event, void *arg)
 	int addr_len = 0;
 	int new_fd = 0;
 
-	struct event *client_ev = NULL;
+	struct socket_data *ev_data = NULL;
 
     addr_len = sizeof(cli_addr);
 	new_fd = accept(sock_fd, (struct sockaddr *)&cli_addr, &addr_len);
@@ -67,16 +148,33 @@ void on_accept(evutil_socket_t sock_fd, short event, void *arg)
 		return;
 	}
 
-	client_ev = (struct event *)malloc(sizeof(struct event));
-	if (NULL == client_ev)
+	ev_data = (struct socket_data *)malloc(sizeof(struct socket_data));
+	if (NULL == ev_data)
 	{
-        printf("fail to malloc");
+        printf("Fail to malloc ev_data\n");
 		return;
 	}
-	event_set(client_ev, new_fd, EV_READ | EV_PERSIST,
-			on_read, event_self_cbarg()/*client_ev*/);
-	event_base_set(base, client_ev);
-	event_add(client_ev, NULL);
+	memset(ev_data, 0, sizeof(struct socket_data));
+
+    ev_data->read_ev = (struct event *)malloc(sizeof(struct event));
+    ev_data->write_ev = (struct event *)malloc(sizeof(struct event));
+	if (NULL == ev_data->read_ev || NULL == ev_data->write_ev)
+	{
+        printf("fail to malloc read/write event\n");
+		goto on_error;
+	}
+	memset(ev_data->read_ev, 0, sizeof(struct event));
+	memset(ev_data->write_ev, 0, sizeof(struct event));
+
+	event_set(ev_data->read_ev, new_fd, EV_READ | EV_PERSIST,
+			on_read, ev_data/*event_self_cbarg()/*client_ev*/);
+	event_base_set(base, ev_data->read_ev);
+	event_add(ev_data->read_ev, NULL);
+
+	return;
+on_error:
+	//release data
+	release_socket_data(ev_data);
 }
 
 int main(int argc, char *argv[])
