@@ -182,6 +182,18 @@ int main(int argc, char *argv[])
     struct sockaddr_in server_addr;
     int sock = -1;
     int flag = 1;
+    const char **basenames = NULL;
+    int i = 0;
+    char varbuf[128];
+
+    /* get version */
+    printf("libevent version: %s\n", event_get_version());
+    printf("libevent version number: %x\n", event_get_version_number());
+
+    basenames = event_get_supported_methods();
+    for (i = 0; basenames[i]; ++i) {
+        printf("method: %s\n", basenames[i]);
+    }
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
@@ -220,6 +232,8 @@ int main(int argc, char *argv[])
         printf("create base failed\n");
         return -1;
     }
+
+    printf("Base method: %s\n", event_base_get_method(base));
 
     event_set(&listen_ev, sock, EV_READ | EV_PERSIST, on_accept, NULL);
     event_base_set(base, &listen_ev);
