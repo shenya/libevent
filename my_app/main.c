@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -130,6 +131,53 @@ on_error:
     return;
 }
 
+//void (*bufferevent_data_cb)(struct bufferevent *bev, void *ctx);
+void buf_ev_read_cb(struct bufferevent *bev, void *arg)
+{
+    printf("%s: hello world\n", __FUNCTION__);
+}
+
+#if 1
+//void (*callback)(evutil_socket_t, short, void *)
+void on_accept(evutil_socket_t sock_fd, short event, void *arg)
+{
+    printf("accept new client\n");
+    struct sockaddr_in cli_addr;
+    int addr_len = 0;
+    int new_fd = 0;
+    int ret = -1;
+
+    addr_len = sizeof(cli_addr);
+    new_fd = accept(sock_fd, (struct sockaddr *)&cli_addr, &addr_len);
+    if (new_fd < 0)
+    {
+        perror("fail to accept");
+        return;
+    }
+
+    struct bufferevent *client_bufevent = NULL;
+
+    client_bufevent = bufferevent_socket_new(base, new_fd, BEV_OPT_CLOSE_ON_FREE);
+    if (NULL == client_bufevent)
+    {
+        printf("bufferevent socket new failed\n");
+        return;
+    }
+
+    bufferevent_setcb(client_bufevent, buf_ev_read_cb, NULL, NULL, NULL);
+    ret = bufferevent_enable(client_bufevent, EV_READ | EV_PERSIST);
+    if (ret < 0)
+    {
+        printf("bufferent enable failed\n");
+        goto on_error;
+    }
+
+    return;
+on_error:
+    bufferevent_free(client_bufevent);
+}
+
+#else
 //void (*callback)(evutil_socket_t, short, void *)
 void on_accept(evutil_socket_t sock_fd, short event, void *arg)
 {
@@ -176,6 +224,20 @@ on_error:
     //release data
     release_socket_data(ev_data);
 }
+#endif
+
+//void (*callback)(evutil_socket_t, short, void *)
+void on_signal_int_cb(evutil_socket_t sock_fd, short event, void *arg)
+{
+    printf("Signal int is received\n");
+    exit(1);
+}
+
+//void (*bufferevent_data_cb)(struct bufferevent *bev, void *ctx);
+void buf_ev_listen_cb(struct bufferevent *bev, void *arg)
+{
+    printf("%s: hello world\n", __FUNCTION__);
+}
 
 int main(int argc, char *argv[])
 {
@@ -185,6 +247,7 @@ int main(int argc, char *argv[])
     const char **basenames = NULL;
     int i = 0;
     char varbuf[128];
+    int ret = -1;
 
     /* get version */
     printf("libevent version: %s\n", event_get_version());
@@ -225,6 +288,7 @@ int main(int argc, char *argv[])
     }
 
     struct event listen_ev;
+    struct event *signal_ev;
 
     base = event_base_new();
     if (NULL == base)
@@ -234,10 +298,37 @@ int main(int argc, char *argv[])
     }
 
     printf("Base method: %s\n", event_base_get_method(base));
-
+#if 1
     event_set(&listen_ev, sock, EV_READ | EV_PERSIST, on_accept, NULL);
     event_base_set(base, &listen_ev);
     event_add(&listen_ev, NULL);
+#else
+    struct bufferevent *listen_bufevent = NULL;
+
+    listen_bufevent = bufferevent_socket_new(base, sock, BEV_OPT_CLOSE_ON_FREE);
+    if (NULL == listen_bufevent)
+    {
+        printf("bufferevent socket new failed\n");
+        return -1;
+    }
+
+    bufferevent_setcb(listen_bufevent, buf_ev_listen_cb, NULL, NULL, NULL);
+    ret = bufferevent_enable(listen_bufevent, EV_READ | EV_PERSIST);
+    if (ret < 0)
+    {
+        printf("bufferent enable failed\n");
+        return -1;
+    }
+#endif
+
+    signal_ev = evsignal_new(base, SIGINT, on_signal_int_cb, NULL);
+    if (NULL == signal_ev)
+    {
+        printf("evsignal new SIGINT failed\n");
+        return -1;
+    }
+    event_add(signal_ev, NULL);
+
     event_base_dispatch(base);
     printf("Start to study at 2016-12-17\n");
 
