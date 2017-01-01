@@ -134,8 +134,62 @@ on_error:
 //void (*bufferevent_data_cb)(struct bufferevent *bev, void *ctx);
 void buf_ev_read_cb(struct bufferevent *bev, void *arg)
 {
+    struct evbuffer *input = NULL;
+    struct evbuffer *output = NULL;
+    char buf[1024] = {0};
+    int ret = 0;
+    size_t input_len = 0;
+    size_t output_len = 0;
+
     printf("%s: hello world\n", __FUNCTION__);
+
+    input = bufferevent_get_input(bev);
+    output = bufferevent_get_output(bev);
+    if (NULL == input || NULL == output)
+    {
+        printf("%s: invalid I/O buffer\n", __FUNCTION__);
+        return;
+    }
+    input_len = evbuffer_get_length(input);
+    printf("input_len: %d\n", input_len);
+    output_len = evbuffer_get_length(output);
+    printf("output_len: %d\n", output_len);
+    ret = evbuffer_remove(input,buf, 1024);
+    if (ret < 0)
+    {
+        return;
+    }
+    printf("Read buf: %s\n", buf);
+
+    evbuffer_add(output, buf, strlen(buf));
+
+    input_len = evbuffer_get_length(input);
+    printf("after r/w: input_len: %d\n", input_len);
+    output_len = evbuffer_get_length(output);
+    printf("after r/w: output_len: %d\n", output_len);
 }
+
+//void (*bufferevent_event_cb)(struct bufferevent *bev, short what, void *ctx);
+void buf_ev_error_cb(struct bufferevent *bev, short what, void *ctx)
+{
+    if (what & BEV_EVENT_EOF)
+    {
+        printf("connection closed\n");
+    }
+    else if (what & BEV_EVENT_ERROR)
+    {
+        printf("unknown error\n");
+    }
+    else if (what & BEV_EVENT_TIMEOUT)
+    {
+        printf("Timed out\n");
+    }
+
+    printf("%s: error cb: event[%d]\n", __FUNCTION__, what);
+
+    bufferevent_free(bev);
+}
+
 
 #if 1
 //void (*callback)(evutil_socket_t, short, void *)
@@ -164,7 +218,7 @@ void on_accept(evutil_socket_t sock_fd, short event, void *arg)
         return;
     }
 
-    bufferevent_setcb(client_bufevent, buf_ev_read_cb, NULL, NULL, NULL);
+    bufferevent_setcb(client_bufevent, buf_ev_read_cb, NULL, buf_ev_error_cb, NULL);
     ret = bufferevent_enable(client_bufevent, EV_READ | EV_PERSIST);
     if (ret < 0)
     {
